@@ -1,0 +1,8 @@
+node_modules/
+# Never commit people's data: import files produced by tools/migrate.py
+*.json.local
+data/
+import/
+*.xlsx
+test/out/
+!package.json
