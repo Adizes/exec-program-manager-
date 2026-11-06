@@ -183,6 +183,10 @@ await step('SME performance chart', async () => {
   const svg = await page.$('.epm-svg');
   if (svg) { const box = await svg.boundingBox(); await page.mouse.move(box.x + box.width * 0.4, box.y + box.height / 2); }
   await shot(page, '13-sme');
+  await page.waitForSelector('.epm-rcard'); await page.$eval('.epm-rcard', el => el.scrollIntoView({ block: 'center' }));
+  await shot(page, '13b-sme-module-cards');
+  await page.click('.epm-chart:has(.epm-rcards) button.epm-link'); await page.waitForSelector('.epm-chart th:has-text("Average")');
+  await shot(page, '13c-sme-module-table');
 });
 await step('team & settings pages render', async () => {
   await page.goto(URL0 + '/#/team'); await page.waitForSelector('text=Invite person'); await shot(page, '14-team');

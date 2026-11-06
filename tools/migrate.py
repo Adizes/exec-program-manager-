@@ -351,7 +351,7 @@ def migrate(path, name, lang):
 
     def block_from_module(mod):
         m = norm(mod)
-        mm = re.match(r'(\d+)\s', m + ' ')
+        mm = re.match(r'(\d+)[\s.]', m + ' ')  # "2. Management Styles", "3 CAPI"
         if 'case study' in m:
             k = re.findall(r'\d+', m)
             return block_by_number.get('CS' + (k[0] if k else '1'))

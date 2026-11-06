@@ -1041,8 +1041,14 @@ function userSave_(b, user) {
   }
   return { ok: true };
 }
+// "Pavel G." matches "Pavel"; "Rodrigo, David" matches both
 function smeNameMatches_(raw, n) {
-  return String(raw || '').split(/,| and /).some(p => p.trim().toLowerCase() === n);
+  const target = normName_(n).replace(/\.$/, '');
+  if (!target) return false;
+  return String(raw || '').split(/,| and /).some(p => {
+    const x = normName_(p).replace(/\.$/, '');
+    return x === target || (x.split(' ')[0] === target.split(' ')[0] && (x.split(' ').length === 1 || target.split(' ').length === 1 || x.split(' ')[1][0] === target.split(' ')[1][0]));
+  });
 }
 
 function settings_() {
@@ -1328,6 +1334,7 @@ function typeformSync_(user) {
 function importCohort_(b, user) {
   const d = b.data || {};
   if (d.format !== 'epm-import') throw new Error('invalid_import_format');
+  if (b.only === 'moduleFeedback') return importModuleFeedbackOnly_(d, user);
   const c = d.cohort || {};
   const existing = rows_('Cohorts').find(x => x.name.toLowerCase() === String(c.name || '').toLowerCase());
   if (existing) {
@@ -1415,6 +1422,43 @@ function importCohort_(b, user) {
   insert_('LmsProgress', Object.keys(lms).map(k => lms[k]));
   return { ok: true, id: cohort.id, counts: { blocks: blocks.length, sessions: sessions.length, learners: (d.learners || []).length, newLearners: newL.length,
     attendance: Object.keys(att).length, weekly: (d.weeklyFeedback || []).length, module: (d.moduleFeedback || []).length, conversations: (d.conversations || []).length } };
+}
+// Re-imports ONLY the module feedback of an existing cohort (replaces the rows that came from the
+// old sheets; Typeform and manual answers stay). Blocks are matched by kind + title, then number.
+function importModuleFeedbackOnly_(d, user) {
+  const c = d.cohort || {};
+  const cohort = rows_('Cohorts').find(x => x.name.toLowerCase() === String(c.name || '').toLowerCase());
+  if (!cohort) throw new Error('not_found');
+  const dbBlocks = rows_('Blocks').filter(x => x.cohortId === cohort.id);
+  const users = {}; rows_('Users').forEach(u => { users[u.email] = u; });
+  const bk = {};
+  (d.blocks || []).forEach(x => {
+    const t = normName_(x.title);
+    const hit = dbBlocks.find(bl => bl.kind === x.kind && normName_(bl.title) === t) ||
+      dbBlocks.find(bl => bl.kind === x.kind && x.number && bl.number === x.number);
+    if (hit) bk[x.key] = hit;
+  });
+  const byName = {};
+  rows_('Learners').forEach(l => { byName[normName_((l.firstName || '') + ' ' + (l.lastName || ''))] = l.email; });
+  const now = new Date().toISOString();
+  let withoutBlock = 0;
+  const recs = (d.moduleFeedback || []).map(w => {
+    const bl = bk[w.blockKey];
+    if (!bl) withoutBlock++;
+    const email = w.email ? normEmail_(w.email) : (byName[normName_(w.nameRaw)] || '');
+    let smeEmail = '';
+    if (bl && bl.smeEmail) {
+      const un = String((users[bl.smeEmail] || {}).name || '').trim().toLowerCase();
+      if (smeNameMatches_(w.smeName, String(bl.smeName || '').trim().toLowerCase()) || (un && smeNameMatches_(w.smeName, un))) smeEmail = bl.smeEmail;
+    }
+    const rec = { id: newId_('M'), cohortId: cohort.id, blockId: bl ? bl.id : '', date: cleanDate_(w.date), email: email, nameRaw: email ? '' : clean_(w.nameRaw, 120),
+      smeName: clean_(w.smeName, 80), smeEmail: smeEmail, applied: clean_(w.applied, 3000), suggest: clean_(w.suggest, 3000), source: 'import', createdAt: now };
+    for (let i = 1; i <= 5; i++) rec['q' + i] = score_(w['q' + i], 1, 10);
+    return rec;
+  });
+  const keep = rows_('ModuleFeedback').filter(m => !(m.cohortId === cohort.id && m.source === 'import'));
+  rewrite_('ModuleFeedback', keep.concat(recs));
+  return { ok: true, id: cohort.id, counts: { 'module feedback': recs.length, 'without block': withoutBlock } };
 }
 function matchOption_(v, list) {
   const n = String(v || '').trim().toLowerCase();

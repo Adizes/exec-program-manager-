@@ -329,6 +329,27 @@ if (dir && existsSync(dir)) {
     c.enrollments.filter(e => ['Dropped Out', 'Moved to next cohort', 'Asynchronous'].includes(e.status)).forEach(e => assert.ok(e.statusDate, 'status date for ' + e.email));
     assert.equal(c.enrollments.length, data.enrollments.length);
   }));
+  t('re-import only the module feedback fixes rows without block and keeps the rest', () => {
+    const data = JSON.parse(readFileSync(join(dir, 'cohort-4.json'), 'utf8'));
+    const c4 = post({ action: 'bootstrap', token: pm }).cohorts.find(c => c.name === 'Cohort 4');
+    // simulate the v1.0 bug: imported module feedback without block, plus one Typeform answer that must survive
+    const M = sheet('ModuleFeedback'); const H = M.rows[0];
+    M.rows.slice(1).forEach(r => { if (r[H.indexOf('cohortId')] === c4.id) r[H.indexOf('blockId')] = ''; });
+    const C = post({ action: 'cohort.get', token: pm, id: c4.id });
+    const blk = C.blocks.find(b => b.kind === 'course');
+    post({ action: 'module.save', token: pm, record: { cohortId: c4.id, blockId: blk.id, email: C.enrollments[0].email, q1: 7, source: 'typeform', externalId: 'tf1' } });
+    const before = C.enrollments.length;
+    const r = post({ action: 'import.cohort', token: pm, data, only: 'moduleFeedback' });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.counts['without block'], 0);
+    const after = post({ action: 'cohort.get', token: pm, id: c4.id });
+    assert.equal(after.moduleFeedback.length, data.moduleFeedback.length + 1);
+    assert.ok(after.moduleFeedback.every(m => m.blockId), 'every response has a block');
+    assert.ok(after.moduleFeedback.some(m => m.externalId === 'tf1'), 'typeform answer kept');
+    assert.equal(after.enrollments.length, before, 'nothing else touched');
+    const perf = post({ action: 'sme.performance', token: pm, sme: 'name:pavel' });
+    assert.ok(perf.module.x.every(x => x !== 'Other'), 'no "Other" block: ' + perf.module.x.join(', '));
+  });
   t('summaries for imported cohorts', () => {
     const b = post({ action: 'bootstrap', token: pm });
     b.cohorts.forEach(c => console.log('     ', c.name.padEnd(14), 'learners', c.learners, 'att', c.attendance == null ? '-' : (c.attendance * 100).toFixed(1) + '%',

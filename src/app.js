@@ -331,7 +331,7 @@ function viewLearners(main) {
 function viewSmes(main) {
   var pm = isPM();
   main.appendChild(h('.epm-page-head', h('div', h('h1', pm ? 'SME performance' : 'My ratings'),
-    h('p.epm-sub', 'X: the content the SME teaches · Y: average rating · one line per cohort.'))));
+    h('p.epm-sub', 'Ratings of the content each SME teaches, compared across cohorts.'))));
   var smes = (S.boot.smes || []).filter(function (s) { return s.role === 'SME' || !s.email; });
   var sel = pm ? selectEl([{ value: '', label: 'Choose an SME…' }].concat(smes.map(function (s) { return { value: s.email || s.key, label: s.name }; })), '', { 'aria-label': 'SME' }) : null;
   var out = h('div');
@@ -343,16 +343,35 @@ function viewSmes(main) {
     out.appendChild(h('.epm-loading', 'Loading…'));
     api('sme.performance', { sme: v }).then(function (r) {
       clear(out);
-      var draw = function (title, data, min, max, note) {
-        if (!data.lines.length) { out.appendChild(h('.epm-card', h('h3', title), empty(pm ? 'No ratings for this SME yet.' : 'No ratings shared with you yet.'))); return; }
-        var series = data.lines.map(function (l) { return { name: l.cohort, values: l.points.map(function (p) { return p ? p.v : null; }) }; });
+      // one color per cohort, the same in both charts (oldest cohort first)
+      var cohorts = {};
+      r.weekly.lines.concat(r.module.lines).forEach(function (l) { cohorts[l.cohort] = l.startDate || ''; });
+      var names = Object.keys(cohorts).sort(function (a, b) { return String(cohorts[a]).localeCompare(String(cohorts[b])); });
+      var color = {}; names.forEach(function (n, i) { color[n] = SERIES[i % SERIES.length]; });
+      var none = function (title) { out.appendChild(h('.epm-card', h('h3', title), empty(pm ? 'No ratings for this SME yet.' : 'No ratings shared with you yet.'))); };
+      // Session feedback: a sequence of modules → lines
+      var W = r.weekly, wt = 'Session feedback (1–5) by module';
+      if (!W.lines.length) none(wt);
+      else {
+        var series = W.lines.map(function (l) { return { name: l.cohort, color: color[l.cohort], values: l.points.map(function (p) { return p ? p.v : null; }), counts: l.points.map(function (p) { return p ? p.n : 0; }) }; });
         var lo = Math.min.apply(null, series.reduce(function (a, s) { return a.concat(s.values.filter(function (v) { return v != null; })); }, []));
-        out.appendChild(h('.epm-card', lineChart({ title: title, x: data.x, series: series, yMin: Math.min(min, Math.floor(lo)), yMax: max, yFmt: function (v) { return Number(v).toFixed(1); },
-          xShort: function (lab, i) { return String(i + 1); }, height: 280 }),
-          h('ol.epm-xkey', data.x.map(function (x) { return h('li', x); })), note ? h('p.epm-small.epm-muted', note) : null));
-      };
-      draw('Session feedback (1–5) by module', r.weekly, 3, 5, 'Average of the 5 questions of the end-of-session survey, for sessions this SME taught.');
-      draw('Module feedback (1–10) by block', r.module, 6, 10);
+        out.appendChild(h('.epm-card', lineChart({ title: wt, x: W.x, series: series, yMin: Math.min(3, Math.floor(lo)), yMax: 5, yFmt: function (v) { return Number(v).toFixed(1); },
+          xShort: function (lab, i) { return String(i + 1); }, xLabel: 'Module', xNumbered: true, height: 280 }),
+          h('ol.epm-xkey', W.x.map(function (x) { return h('li', x); })),
+          h('p.epm-small.epm-muted', 'Average of the 5 questions of the end-of-session survey, for sessions this SME taught. The numbers on the axis are the modules listed above.')));
+      }
+      // Module feedback: few blocks → one card per block
+      var Md = r.module, mt = 'Module feedback (1–10) by block';
+      if (!Md.lines.length) none(mt);
+      else {
+        var rows = Md.x.map(function (label, i) {
+          var items = Md.lines.map(function (l) { var p = l.points[i]; return p ? { name: l.cohort, value: p.v, n: p.n, color: color[l.cohort] } : null; }).filter(Boolean);
+          var n = items.reduce(function (a, it) { return a + it.n; }, 0);
+          return { label: label, items: items, n: n, overall: n ? items.reduce(function (a, it) { return a + it.value * it.n; }, 0) / n : null };
+        }).filter(function (row) { return row.items.length; });
+        out.appendChild(h('.epm-card', ratingCards({ title: mt, min: 1, max: 10, rows: rows, itemLabel: 'Block',
+          groups: names.filter(function (n) { return Md.lines.some(function (l) { return l.cohort === n; }); }).map(function (n) { return { name: n, color: color[n] }; }) })));
+      }
     }).catch(function (e) { clear(out); out.appendChild(empty(e.message)); });
   }
   if (pm) sel.addEventListener('change', function () { load(sel.value); }); else load(S.user.email);
@@ -418,10 +437,12 @@ function viewSettings(main) {
   // import
   var files = h('input', { type: 'file', accept: '.json,application/json', multiple: true });
   var replace = h('input', { type: 'checkbox' });
+  var onlyMf = h('input', { type: 'checkbox' });
   var log = h('ul.epm-log');
   main.appendChild(h('.epm-card', h('h3', 'Import from the old Matrix sheets'),
     h('p.epm-small.epm-muted', 'Upload the .json files generated from each “Cohort X – Matrix” with tools/migrate.py. One cohort per file.'),
-    h('.epm-row2', files, h('label.epm-check', replace, h('span', 'Replace a cohort with the same name'))),
+    h('.epm-row2', files, h('.epm-stack', h('label.epm-check', replace, h('span', 'Replace a cohort with the same name')),
+      h('label.epm-check', onlyMf, h('span', 'Only re-import the module feedback (keeps everything else)')))),
     h('.epm-actions', btn('Import', { icon: 'upload', kind: 'primary' }, function () {
       var list = Array.prototype.slice.call(files.files);
       if (!list.length) return toast('Choose the JSON files', 'error');
@@ -430,7 +451,7 @@ function viewSettings(main) {
         chain = chain.then(function () { return f.text(); }).then(function (txt) {
           var data = JSON.parse(txt);
           log.appendChild(h('li', 'Importing ' + (data.cohort && data.cohort.name) + '…'));
-          return api('import.cohort', { data: data, replace: replace.checked }).then(function (r) {
+          return api('import.cohort', { data: data, replace: replace.checked, only: onlyMf.checked ? 'moduleFeedback' : '' }).then(function (r) {
             log.lastChild.textContent = '✓ ' + data.cohort.name + ': ' + Object.keys(r.counts).map(function (k) { return r.counts[k] + ' ' + k; }).join(', ');
           });
         }).catch(function (e) { log.appendChild(h('li.epm-t-low', '✗ ' + f.name + ': ' + e.message)); });

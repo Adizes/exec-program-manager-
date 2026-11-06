@@ -367,3 +367,20 @@ select.epm-input { padding-right: 28px; }
   .epm-sticky { min-width: 130px; }
   .epm-toolbar .epm-input { min-width: 0; flex: 1 1 100%; }
 }
+
+/* rating cards (SME module feedback) */
+.epm-rcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 12px; }
+.epm-rcard { display: grid; grid-template-columns: 104px 1fr; gap: 14px; align-items: center; border: 1px solid var(--line); border-radius: var(--r); padding: 14px; background: #fcfcfb; }
+.epm-rcard-ring { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.epm-rcard-ring small { font-size: 11px; color: var(--muted); }
+.epm-ring-v { font: 800 22px Montserrat, system-ui, sans-serif; fill: var(--ink); }
+.epm-ring-u { font: 600 10px Montserrat, system-ui, sans-serif; fill: var(--muted); }
+.epm-root .epm-rcard h5 { margin: 0 0 10px; font-size: 14px; font-weight: 700; line-height: 1.3; color: var(--ink); text-transform: none; letter-spacing: 0; }
+.epm-rbars { display: flex; flex-direction: column; gap: 7px; }
+.epm-rbar { display: grid; grid-template-columns: minmax(70px, 34%) 1fr 64px; gap: 8px; align-items: center; font-size: 12px; }
+.epm-rbar-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-2); }
+.epm-rbar-track { height: 10px; background: #ececea; border-radius: 0 4px 4px 0; overflow: hidden; }
+.epm-rbar-track i { display: block; height: 100%; border-radius: 0 4px 4px 0; }
+.epm-rbar-val { font-weight: 700; text-align: right; white-space: nowrap; }
+.epm-rbar-val small { font-weight: 500; color: var(--muted); }
+@media (max-width: 640px) { .epm-rcards { grid-template-columns: 1fr; } .epm-rcard { grid-template-columns: 1fr; justify-items: start; } }

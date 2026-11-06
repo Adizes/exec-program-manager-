@@ -82,8 +82,13 @@ function lineChart(opts) {
     body.appendChild(svg); body.appendChild(tip);
   }
   function dataTable() {
-    return h('.epm-table-wrap', h('table.epm-table.epm-table-sm', h('thead', h('tr', h('th', ''), opts.series.map(function (s) { return h('th', s.name); }))),
-      h('tbody', opts.x.map(function (x, i) { return h('tr', h('td', String(x)), opts.series.map(function (s) { return h('td.num', s.values[i] == null ? '—' : fmt(s.values[i])); })); }))));
+    return h('.epm-table-wrap', h('table.epm-table.epm-table-sm', h('thead', h('tr', h('th', opts.xLabel || ''), opts.series.map(function (s) { return h('th.num', s.name); }))),
+      h('tbody', opts.x.map(function (x, i) {
+        return h('tr', h('td', (opts.xNumbered ? (i + 1) + '. ' : '') + String(x)), opts.series.map(function (s) {
+          var v = s.values[i];
+          return h('td.num', v == null ? h('span.epm-muted', '—') : [h('b', fmt(v)), s.counts && s.counts[i] ? h('span.epm-muted.epm-small', ' · ' + s.counts[i] + ' resp.') : null]);
+        }));
+      }))));
   }
   setTimeout(draw, 0);
   if (window.ResizeObserver) { var last = 0; new ResizeObserver(function () { var w = wrap.clientWidth; if (Math.abs(w - last) > 20) { last = w; draw(); } }).observe(wrap); }
@@ -102,4 +107,52 @@ function barList(opts) {
         h('.epm-bar-track', h('.epm-bar-fill', { style: { width: w + '%', background: r.color || SERIES[0] } })),
         h('.epm-bar-val', r.value == null ? '—' : fmt(r.value), r.sub ? h('small', ' ' + r.sub) : null));
     })) : empty('No data yet.'));
+}
+
+// One card per item: a single completion ring with the overall score, then one bar per group.
+// opts: { title, min, max, rows: [{label, overall, n, items: [{name, value, n, color}]}], groups: [{name, color}] }
+function ratingCards(opts) {
+  var min = opts.min, max = opts.max, tableMode = false;
+  var wrap = h('.epm-chart');
+  var body = h('div');
+  var head = h('.epm-chart-head', h('h4', opts.title),
+    h('button.epm-link', { type: 'button', onclick: function () { tableMode = !tableMode; this.textContent = tableMode ? 'Cards' : 'Table'; draw(); } }, 'Table'));
+  var legend = opts.groups.length > 1 ? h('.epm-legend', opts.groups.map(function (g) { return h('span.epm-legend-i', h('i', { style: { background: g.color } }), g.name); })) : null;
+  append(wrap, [head, legend, body]);
+  function ring(v) {
+    var R = 38, C = 2 * Math.PI * R, f = v == null ? 0 : Math.max(0, Math.min(1, (v - min) / (max - min)));
+    var svg = sv('svg', { viewBox: '0 0 96 96', width: 96, height: 96, class: 'epm-ring', role: 'img', 'aria-label': 'Average ' + (v == null ? 'none' : v.toFixed(1)) + ' out of ' + max });
+    sv('circle', { cx: 48, cy: 48, r: R, fill: 'none', stroke: '#ececea', 'stroke-width': 10 }, svg);
+    sv('circle', { cx: 48, cy: 48, r: R, fill: 'none', stroke: '#111111', 'stroke-width': 10, 'stroke-linecap': 'round',
+      'stroke-dasharray': (C * f).toFixed(1) + ' ' + C.toFixed(1), transform: 'rotate(-90 48 48)' }, svg);
+    var t = sv('text', { x: 48, y: 50, 'text-anchor': 'middle', class: 'epm-ring-v' }, svg); t.textContent = v == null ? '—' : v.toFixed(1);
+    var u = sv('text', { x: 48, y: 66, 'text-anchor': 'middle', class: 'epm-ring-u' }, svg); u.textContent = '/ ' + max;
+    return svg;
+  }
+  function draw() {
+    clear(body);
+    if (!opts.rows.length) { body.appendChild(empty('No data yet.')); return; }
+    if (tableMode) {
+      body.appendChild(h('.epm-table-wrap', h('table.epm-table.epm-table-sm', h('thead', h('tr', h('th', opts.itemLabel || ''), opts.groups.map(function (g) { return h('th.num', g.name); }), h('th.num', 'Average'))),
+        h('tbody', opts.rows.map(function (r) {
+          return h('tr', h('td', h('b', r.label)), opts.groups.map(function (g) {
+            var it = r.items.find(function (x) { return x.name === g.name; });
+            return h('td.num', it && it.value != null ? [h('b', it.value.toFixed(1)), h('span.epm-muted.epm-small', ' /' + max + ' · ' + it.n + ' resp.')] : h('span.epm-muted', '—'));
+          }), h('td.num', r.overall == null ? '—' : [h('b', r.overall.toFixed(1)), h('span.epm-muted.epm-small', ' · ' + r.n + ' resp.')]));
+        })))));
+      return;
+    }
+    body.appendChild(h('.epm-rcards', opts.rows.map(function (r) {
+      return h('.epm-rcard', h('.epm-rcard-ring', ring(r.overall), h('small', r.n + ' responses')),
+        h('.epm-rcard-body', h('h5', r.label), h('.epm-rbars', r.items.map(function (it) {
+          var w = it.value == null ? 0 : Math.max(0, Math.min(1, (it.value - min) / (max - min))) * 100;
+          return h('.epm-rbar', { title: it.name + ': ' + (it.value == null ? '—' : it.value.toFixed(2)) + ' / ' + max + ' · ' + it.n + ' responses' },
+            h('span.epm-rbar-name', it.name), h('span.epm-rbar-track', h('i', { style: { width: w + '%', background: it.color } })),
+            h('span.epm-rbar-val', it.value == null ? '—' : it.value.toFixed(1), h('small', ' · ' + it.n)));
+        }))));
+    })));
+    body.appendChild(h('p.epm-small.epm-muted', 'Ring: average of all cohorts (weighted by responses). Bars: each cohort, on the ' + min + '–' + max + ' scale · number of responses after the dot.'));
+  }
+  draw();
+  return wrap;
 }
