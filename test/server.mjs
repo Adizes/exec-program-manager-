@@ -51,7 +51,7 @@ export function start(opts = {}) {
 body{margin:0;font-family:Arial,sans-serif;font-size:16px;color:#333;line-height:20px}
 h1,h2,h3{margin:20px 0 10px;font-weight:bold;text-transform:uppercase}
 a{color:#3898ec;text-decoration:underline} button,input,select,textarea{font-size:18px;margin:0 0 10px;border-radius:0}
-p{margin-bottom:10px} img{max-width:100%;vertical-align:middle;display:inline-block} label{display:block;margin-bottom:5px;font-weight:bold}
+ul,ol{padding-left:40px;margin-top:0;margin-bottom:10px} li{list-style:disc} p{margin-bottom:10px} img{max-width:100%;vertical-align:middle;display:inline-block} label{display:block;margin-bottom:5px;font-weight:bold}
 .w-nav{height:70px;background:#fff;border-bottom:1px solid #eee}</style></head>
 <body><div class="w-nav"></div><div id="epm-app"></div>
 <script>window.EPM_CONFIG = ${JSON.stringify(cfg)};</script><script src="/dist/epm.js"></script></body></html>`;

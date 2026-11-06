@@ -281,6 +281,38 @@ t('every mutation is in the Log tab', () => {
   assert.ok(!JSON.stringify(sheet('Log').rows).includes(pm), 'tokens never logged');
 });
 
+console.log('v1.1 status rules');
+t('status change records the date it applies from', () => {
+  const r0 = post({ action: 'cohort.create', token: pm, data: { name: 'Cohort Status' }, structure: { blocks: [{ key: 'a', kind: 'course', number: '1', title: 'X' }],
+    sessions: ['2026-01-05', '2026-01-07', '2026-01-12', '2026-01-14'].map(d => ({ blockKey: 'a', date: d })) } });
+  post({ action: 'learner.add', token: pm, cohortId: r0.id, people: [{ email: 'p1@x.com', firstName: 'P', lastName: 'One' }, { email: 'p2@x.com', firstName: 'P', lastName: 'Two' }, { email: 'p3@x.com', firstName: 'P', lastName: 'Three' }] });
+  let C = post({ action: 'cohort.get', token: pm, id: r0.id });
+  const recs = [];
+  C.sessions.forEach(x => ['p1@x.com', 'p2@x.com', 'p3@x.com'].forEach(e => recs.push({ sessionId: x.id, email: e, status: e === 'p2@x.com' && x.date > '2026-01-07' ? 'Absent' : 'Present' })));
+  post({ action: 'attendance.save', token: pm, cohortId: r0.id, records: recs });
+  const e2 = C.enrollments.find(e => e.email === 'p2@x.com'), e3 = C.enrollments.find(e => e.email === 'p3@x.com');
+  assert.equal(post({ action: 'enrollment.update', token: pm, id: e2.id, patch: { status: 'Dropped Out', statusDate: '2026-01-07' } }).enrollment.statusDate, '2026-01-07');
+  assert.equal(post({ action: 'enrollment.update', token: pm, id: e3.id, patch: { status: 'Low Activity' } }).ok, true);
+  assert.equal(post({ action: 'enrollment.update', token: pm, id: e3.id, patch: { status: 'Enrolled Inactive' } }).error, 'invalid_status');
+  const sum = post({ action: 'bootstrap', token: pm }).cohorts.find(c => c.id === r0.id);
+  assert.equal(sum.learners, 2, 'Low Activity still counts, Dropped Out does not');
+  assert.equal(sum.attendance, 1);
+});
+t('legacy data is migrated automatically (Enrolled Inactive, missing status dates)', () => {
+  const E = sheet('Enrollments');
+  const H = E.rows[0];
+  const ix = (c) => H.indexOf(c);
+  // fake legacy rows: rename one to Enrolled Inactive and blank a status date
+  const rows = E.rows.slice(1).filter(r => r[ix('email')] === 'p3@x.com' || r[ix('email')] === 'p2@x.com');
+  rows.forEach(r => { if (r[ix('email')] === 'p3@x.com') r[ix('status')] = 'Enrolled Inactive'; else r[ix('statusDate')] = ''; });
+  const st = sheet('Settings'); const vr = st.rows.find(r => r[0] === 'schemaVersion'); vr[1] = '1';
+  post({ action: 'bootstrap', token: pm });
+  const after = E.rows.slice(1).filter(r => r[ix('email')] === 'p3@x.com' || r[ix('email')] === 'p2@x.com');
+  assert.equal(after.find(r => r[ix('email')] === 'p3@x.com')[ix('status')], 'Low Activity');
+  assert.equal(after.find(r => r[ix('email')] === 'p2@x.com')[ix('statusDate')], '2026-01-07', 'last session attended');
+  assert.equal(st.rows.find(r => r[0] === 'schemaVersion')[1], '2');
+});
+
 // ---- real data ----
 const dir = process.env.IMPORT_DIR;
 if (dir && existsSync(dir)) {
@@ -293,6 +325,8 @@ if (dir && existsSync(dir)) {
     assert.equal(post({ action: 'import.cohort', token: pm, data }).error, 'invalid_name_exists');
     const c = post({ action: 'cohort.get', token: pm, id: r.id });
     assert.equal(c.sessions.length, data.sessions.length);
+    assert.ok(!c.enrollments.some(e => e.status === 'Enrolled Inactive'));
+    c.enrollments.filter(e => ['Dropped Out', 'Moved to next cohort', 'Asynchronous'].includes(e.status)).forEach(e => assert.ok(e.statusDate, 'status date for ' + e.email));
     assert.equal(c.enrollments.length, data.enrollments.length);
   }));
   t('summaries for imported cohorts', () => {

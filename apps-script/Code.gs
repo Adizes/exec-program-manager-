@@ -42,7 +42,7 @@ const CONFIG = {
  * Option lists shared with the web app (edit here to add values)
  * ---------------------------------------------------------------------------------- */
 const OPTIONS = {
-  enrollmentStatus: ['Enrolled Active', 'Enrolled Inactive', 'Asynchronous', 'Dropped Out', 'Moved to next cohort', 'Graduated'],
+  enrollmentStatus: ['Enrolled Active', 'Low Activity', 'Asynchronous', 'Dropped Out', 'Moved to next cohort', 'Graduated'],
   welcomeKit: ['Yes', 'No', 'On the way', 'N/A', 'Pending'],
   certification: ['Yes', 'No', 'Pending'],
   lifecycle: ['Infancy', 'Go-Go', 'Adolescence', 'Prime', 'Aristocracy', 'Bureaucracy', 'Recrimination'],
@@ -56,8 +56,15 @@ const OPTIONS = {
   languages: ['en', 'es'],
   roles: ['PM', 'SME'],
 };
-// Statuses that do NOT count in cohort averages
+// Statuses of people who left the cohort: not counted in learner counts or averages
 const INACTIVE_STATUSES = ['Dropped Out', 'Moved to next cohort'];
+// Statuses with no live attendance FROM their statusDate on (sessions after that date do not count)
+const NO_LIVE_STATUSES = INACTIVE_STATUSES.concat(['Asynchronous']);
+const SCHEMA_VERSION = 2;
+function attendanceApplies_(e, date) {
+  if (NO_LIVE_STATUSES.indexOf(e.status) < 0) return true;
+  return !!(e.statusDate && date && date <= e.statusDate);
+}
 
 const DEFAULT_SETTINGS = {
   presentThresholdPct: '50',      // Zoom import: % of the session a person must attend to be Present
@@ -66,6 +73,7 @@ const DEFAULT_SETTINGS = {
   typeformModuleFormId_en: '',
   typeformModuleFormId_es: '',
   typeformLastSync: '',
+  schemaVersion: '1',
 };
 
 /* ----------------------------------------------------------------------------------
@@ -94,7 +102,7 @@ const SCHEMA = {
   },
   Enrollments: {
     key: 'id', cols: ['id', 'email', 'cohortId', 'status', 'welcomeEmailSent', 'certificationSent', 'teachableUserId', 'statusChangedAt',
-      'movedFromCohortId', 'movedToCohortId', 'createdAt'],
+      'movedFromCohortId', 'movedToCohortId', 'createdAt', 'statusDate'],
     types: { welcomeEmailSent: 'b' },
   },
   Attendance: { key: 'id', cols: ['id', 'cohortId', 'sessionId', 'email', 'status', 'minutes', 'source', 'updatedAt'], types: { minutes: 'n' } },
@@ -369,6 +377,7 @@ function publicUser_(u) { return { email: u.email, name: u.name, role: u.role };
  *  BOOTSTRAP — what the app needs after sign-in
  * ================================================================================= */
 function bootstrap_(user) {
+  migrate_();
   const cohorts = visibleCohorts_(user).map(c => Object.assign(pick_(c, ['id', 'name', 'code', 'language', 'startDate', 'status', 'lastLmsSync']), cohortSummary_(c.id)));
   cohorts.sort((a, b) => String(b.startDate).localeCompare(String(a.startDate)));
   const out = {
@@ -428,9 +437,11 @@ function cohortSummary_(cohortId) {
   const enr = rows_('Enrollments').filter(e => e.cohortId === cohortId);
   const counted = enr.filter(e => INACTIVE_STATUSES.indexOf(e.status) < 0);
   const emails = {}; counted.forEach(e => emails[e.email] = 1);
+  // attendance average: people expected at live sessions (not Asynchronous)
+  const live = {}; counted.forEach(e => { if (NO_LIVE_STATUSES.indexOf(e.status) < 0) live[e.email] = 1; });
   const att = {};
   rows_('Attendance').forEach(a => {
-    if (a.cohortId !== cohortId || !emails[a.email]) return;
+    if (a.cohortId !== cohortId || !live[a.email]) return;
     const r = att[a.email] || (att[a.email] = { p: 0, t: 0 });
     if (a.status === 'Present') { r.p++; r.t++; } else if (a.status === 'Absent') r.t++;
   });
@@ -707,8 +718,10 @@ function enrollmentUpdate_(b) {
   const p = b.patch || {}, patch = {};
   if ('status' in p) {
     if (OPTIONS.enrollmentStatus.indexOf(p.status) < 0) throw new Error('invalid_status');
-    if (p.status !== e.status) { patch.status = p.status; patch.statusChangedAt = new Date().toISOString(); }
+    if (p.status !== e.status) { patch.status = p.status; patch.statusChangedAt = new Date().toISOString(); patch.statusDate = today_(); }
   }
+  // date from which the status applies (Dropped Out / Moved / Asynchronous: later sessions do not count)
+  if ('statusDate' in p && cleanDate_(p.statusDate)) patch.statusDate = cleanDate_(p.statusDate);
   if ('welcomeEmailSent' in p) patch.welcomeEmailSent = !!p.welcomeEmailSent;
   if ('certificationSent' in p) patch.certificationSent = OPTIONS.certification.indexOf(p.certificationSent) >= 0 ? p.certificationSent : '';
   if ('teachableUserId' in p) patch.teachableUserId = clean_(p.teachableUserId, 20);
@@ -730,7 +743,7 @@ function enrollmentMove_(b, user) {
       teachableUserId: e.teachableUserId, statusChangedAt: now, movedFromCohortId: e.cohortId, createdAt: now };
     insert_('Enrollments', [target]);
   }
-  update_('Enrollments', e.id, { status: 'Moved to next cohort', movedToCohortId: to.id, statusChangedAt: now });
+  update_('Enrollments', e.id, { status: 'Moved to next cohort', movedToCohortId: to.id, statusChangedAt: now, statusDate: cleanDate_(b.date) || today_() });
   if (b.note) {
     insert_('Conversations', [{ id: newId_('V'), cohortId: e.cohortId, email: e.email, date: today_(), withName: user.name || user.email,
       initiatedBy: 'Adizes', via: [], categories: ['Other'], description: 'Moved to ' + to.name + (b.note ? ': ' + clean_(b.note, 500) : ''),
@@ -1039,7 +1052,7 @@ function settings_() {
 }
 function settingsSave_(b) {
   const p = b.settings || {};
-  const recs = Object.keys(DEFAULT_SETTINGS).filter(k => k in p && k !== 'typeformLastSync').map(k => ({ key: k, value: clean_(p[k], 200) }));
+  const recs = Object.keys(DEFAULT_SETTINGS).filter(k => k in p && k !== 'typeformLastSync' && k !== 'schemaVersion').map(k => ({ key: k, value: clean_(p[k], 200) }));
   if (recs.length) upsert_('Settings', recs);
   return { ok: true, settings: settings_() };
 }
@@ -1359,9 +1372,18 @@ function importCohort_(b, user) {
     }
   });
   if (newL.length) insert_('Learners', newL);
-  insert_('Enrollments', (d.enrollments || []).filter(x => isEmail_(normEmail_(x.email))).map(x => ({ id: newId_('E'), email: normEmail_(x.email), cohortId: cohort.id,
-    status: OPTIONS.enrollmentStatus.indexOf(x.status) >= 0 ? x.status : 'Enrolled Active', welcomeEmailSent: !!x.welcomeEmailSent,
-    certificationSent: OPTIONS.certification.indexOf(x.certificationSent) >= 0 ? x.certificationSent : '', statusChangedAt: now, createdAt: now })));
+  // people who left: their status applies from their last session attended (the PM can correct it)
+  const sessDate = {}; (d.sessions || []).forEach(x => { sessDate[x.key] = cleanDate_(x.date); });
+  const firstDate = Object.keys(sessDate).map(k => sessDate[k]).filter(Boolean).sort()[0] || '';
+  const lastPresent = {};
+  (d.attendance || []).forEach(a => { const dt = sessDate[a.sessionKey]; const em = normEmail_(a.email);
+    if (a.status === 'Present' && dt && (!lastPresent[em] || dt > lastPresent[em])) lastPresent[em] = dt; });
+  insert_('Enrollments', (d.enrollments || []).filter(x => isEmail_(normEmail_(x.email))).map(x => {
+    const status = x.status === 'Enrolled Inactive' ? 'Low Activity' : (OPTIONS.enrollmentStatus.indexOf(x.status) >= 0 ? x.status : 'Enrolled Active');
+    return { id: newId_('E'), email: normEmail_(x.email), cohortId: cohort.id, status: status, welcomeEmailSent: !!x.welcomeEmailSent,
+      certificationSent: OPTIONS.certification.indexOf(x.certificationSent) >= 0 ? x.certificationSent : '', statusChangedAt: now, createdAt: now,
+      statusDate: NO_LIVE_STATUSES.indexOf(status) >= 0 ? (lastPresent[normEmail_(x.email)] || firstDate) : '' };
+  }));
 
   // name → email across ALL learners (people moved between cohorts appear by name in other sheets)
   const byName = {};
@@ -1404,6 +1426,7 @@ function matchOption_(v, list) {
  * ================================================================================= */
 function dailyJobs() {
   MEMO_ = {};
+  migrate_();
   const system = { email: 'system', name: 'System', role: 'PM' };
   const t = today_();
   rows_('Cohorts').filter(c => c.status === 'Active').forEach(c => {
@@ -1415,6 +1438,36 @@ function dailyJobs() {
   MEMO_ = {};
   withLock_(() => { const keep = rows_('AuthSessions').filter(s => s.expiresAt > new Date().toISOString()); if (keep.length !== rows_('AuthSessions').length) rewrite_('AuthSessions', keep); });
   return t;
+}
+
+/* =================================================================================
+ *  DATA MIGRATIONS — run automatically (sign-in bootstrap, nightly job, setup)
+ *  v2: "Enrolled Inactive" → "Low Activity"; Dropped / Moved / Asynchronous get the date
+ *      their status applies from (last session attended, or the cohort start).
+ * ================================================================================= */
+function migrate_() {
+  if (Number(settings_().schemaVersion || 1) >= SCHEMA_VERSION) return;
+  withLock_(() => {
+    MEMO_ = {};
+    if (Number(settings_().schemaVersion || 1) >= SCHEMA_VERSION) return;
+    const sess = {}, firstDate = {}, lastPresent = {};
+    rows_('Sessions').forEach(x => { sess[x.id] = x; if (x.date && (!firstDate[x.cohortId] || x.date < firstDate[x.cohortId])) firstDate[x.cohortId] = x.date; });
+    rows_('Attendance').forEach(a => {
+      const x = sess[a.sessionId]; if (a.status !== 'Present' || !x || !x.date) return;
+      const k = a.cohortId + '|' + a.email; if (!lastPresent[k] || x.date > lastPresent[k]) lastPresent[k] = x.date;
+    });
+    let changed = false;
+    const out = rows_('Enrollments').map(e => {
+      let o = e;
+      if (o.status === 'Enrolled Inactive') { o = Object.assign({}, o, { status: 'Low Activity' }); changed = true; }
+      if (NO_LIVE_STATUSES.indexOf(o.status) >= 0 && !o.statusDate) {
+        o = Object.assign({}, o, { statusDate: lastPresent[o.cohortId + '|' + o.email] || firstDate[o.cohortId] || '' }); changed = true;
+      }
+      return o;
+    });
+    if (changed) rewrite_('Enrollments', out);
+    upsert_('Settings', [{ key: 'schemaVersion', value: String(SCHEMA_VERSION) }]);
+  });
 }
 
 /* =================================================================================
@@ -1591,6 +1644,7 @@ function newId_(prefix) {
 function setup() {
   MEMO_ = {};
   Object.keys(SCHEMA).forEach(t => table_(t));
+  migrate_();
   const me = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
   const pms = CONFIG.INITIAL_PMS.concat(me && CONFIG.ALLOWED_DOMAINS.some(d => me.endsWith('@' + d)) ? [me] : []);
   pms.forEach(email => {

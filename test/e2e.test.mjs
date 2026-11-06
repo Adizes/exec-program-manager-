@@ -72,6 +72,9 @@ await step('Webflow global CSS does not leak (button font size stays 13px)', asy
 await step('cohort overview', async () => {
   await page.click(`a.epm-ccard[href="#/c/${C4.id}/overview"]`);
   await page.waitForSelector('.epm-kpis'); await page.waitForTimeout(300); await shot(page, '02-overview');
+  if (C4.name === 'Cohort 4') assert.equal(await page.$$eval('.epm-legend-i', x => x.length), 2, 'two lines: in program + attended');
+  const bullets = await page.$$eval('.epm-risk li', lis => lis.map(li => getComputedStyle(li).listStyleType));
+  assert.ok(bullets.every(b => b === 'none'), 'no bullets from the site CSS');
 });
 await step('learners table + learner panel', async () => {
   await page.click('a.epm-tab:has-text("Learners")'); await page.waitForSelector('.epm-table-click tbody tr');
@@ -92,6 +95,7 @@ await step('calendar + edit a session', async () => {
 await step('attendance grid: toggle a cell saves', async () => {
   await page.click('a.epm-tab:has-text("Attendance")'); await page.waitForSelector('.epm-att-table');
   await shot(page, '06-attendance');
+  if (C4.name === 'Cohort 4') assert.ok((await page.$$('.epm-att.na')).length > 10, 'sessions after a drop-out are not counted');
   const before = srv.G.sheet('Attendance').rows.length;
   await page.click('.epm-att-table tbody tr:first-child td.epm-att button >> nth=0');
   await page.waitForSelector('.epm-toast:has-text("Attendance saved")', { timeout: 10000 });

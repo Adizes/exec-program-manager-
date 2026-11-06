@@ -45,7 +45,7 @@ function tabOverview(el, ctx) {
   var M = ctx.M, C = ctx.C, K = M.kpi;
   el.appendChild(h('.epm-kpis',
     kpi('Learners counted', String(K.learners), C.enrollments.length !== K.learners ? (C.enrollments.length - K.learners) + ' dropped / moved' : null),
-    kpi('Attendance', pct(K.attendance), M.doneSessions.length + ' of ' + C.sessions.length + ' sessions held', tone(K.attendance)),
+    kpi('Attendance', pct(K.attendance), 'Average of current learners · ' + M.doneSessions.length + ' of ' + C.sessions.length + ' sessions held', tone(K.attendance)),
     kpi('LMS progress', pct(K.lms), M.expectedLms != null ? 'Expected by now: ' + pct(M.expectedLms) : 'No Teachable courses yet', tone(K.lms)),
     kpi('Session rating', K.weekly == null ? '—' : num(K.weekly) + ' / 5', (C.weeklyFeedback || []).length + ' responses'),
     kpi('Module rating', K.module == null ? '—' : num(K.module) + ' / 10', (C.moduleFeedback || []).length + ' responses'),
@@ -73,8 +73,11 @@ function tabOverview(el, ctx) {
   el.appendChild(h('.epm-card', lineChart({
     title: 'Attendance per session', x: held.map(function (s) { return fmtDate(s.date) + ' · ' + (s.moduleNo || M.block[s.blockId].title); }),
     xShort: function (lab) { return lab.split(' · ')[0]; },
-    series: [{ name: 'Attendance', values: held.map(function (s) { return M.sessionRate[s.id].rate * 100; }) }], yMin: 0, yMax: 100, yFmt: function (v) { return Math.round(v) + '%'; },
-  })));
+    series: [
+      { name: 'Still in the program', values: held.map(function (s) { return M.sessionRate[s.id].activeRate * 100; }) },
+      { name: 'Attended the session', values: held.map(function (s) { return M.sessionRate[s.id].rate * 100; }) }],
+    yMin: 0, yMax: 100, yFmt: function (v) { return Math.round(v) + '%'; },
+  }), h('p.epm-small.epm-muted', 'Both lines are a share of the ' + M.launch + ' learners enrolled at launch (plus anyone moved in later, from the date they joined). The gap between the lines is people still enrolled who did not attend.')));
   // ratings by block
   var rows = C.blocks.map(function (b) {
     var w = (C.weeklyFeedback || []).filter(function (x) { return x.blockId === b.id; }).map(overall5).filter(function (v) { return v != null; });
@@ -104,7 +107,7 @@ function tabLearners(el, ctx) {
         var l = M.learner[e.email] || { email: e.email }, s = M.stats[e.email];
         return h('tr', { tabindex: '0', onclick: function () { learnerDrawer(ctx, e.email); }, onkeydown: function (ev) { if (ev.key === 'Enter') learnerDrawer(ctx, e.email); } },
           h('td', h('b', fullName(l)), h('div.epm-muted.epm-small', [l.company, pm ? l.email : ''].filter(Boolean).join(' · '))),
-          h('td', statusBadge(e.status)),
+          h('td', statusBadge(e.status, e)),
           h('td.num', pctCell(s.att)), h('td.num', pctCell(s.lms)),
           h('td.num', s.exp == null ? '—' : num(s.exp)), h('td.num', s.mod == null ? '—' : num(s.mod)),
           pm ? [h('td.num', String(s.convs)), h('td.num', l.profileSubmittedAt ? badge('Done', 'good') : badge('—', 'muted')), h('td.num', l.welcomeKit || '—'), h('td.num', l.booksCode || '—'), h('td.num', e.certificationSent || '—')] : null,
@@ -160,7 +163,7 @@ function tabCalendar(el, ctx) {
     var ss = M.blockSessions[b.id] || [];
     var card = h('.epm-card.epm-block');
     card.appendChild(h('.epm-block-head', h('div', h('span.epm-block-no', b.kind === 'course' ? b.number : (b.kind === 'case_study' ? b.number : '')), h('b', b.title)),
-      h('span.epm-muted', [smeLabel(b), b.teachableCourseId ? 'Teachable ' + b.teachableCourseId : ''].filter(Boolean).join(' · '))));
+      h('span.epm-muted', smeLabel(b) ? 'SME: ' + smeLabel(b) : '')));
     var tb = h('tbody');
     ss.forEach(function (s) {
       if (prev && s.date && prev.date && (pd(s.date) - pd(prev.date)) / 864e5 > 10) tb.appendChild(h('tr.epm-break', h('td', { colspan: '5' }, 'Break · ' + Math.round((pd(s.date) - pd(prev.date)) / 864e5 / 7 - 1) + ' week(s) without sessions')));
@@ -170,11 +173,12 @@ function tabCalendar(el, ctx) {
       tb.appendChild(h('tr', { class: (done ? 'epm-done ' : '') + (pm ? 'epm-clickable' : ''), tabindex: pm ? '0' : null, onclick: pm ? function () { sessionModal(ctx, s); } : null, onkeydown: pm ? function (e) { if (e.key === 'Enter') sessionModal(ctx, s); } : null },
         h('td.epm-nowrap', fmtDate(s.date, true)),
         h('td', h('b', s.moduleNo || ''), ' ', s.moduleTitle || '', s.smeEmail || s.smeName ? h('div.epm-small.epm-muted', 'SME: ' + smeLabel(s)) : null),
-        h('td.epm-small', s.defreeze ? h('span', { title: 'Defreeze question' }, '❄ ' + s.defreeze) : (done && pm ? h('span.epm-muted', 'No defreeze yet') : '')),
+        h('td.epm-small', s.defreeze ? h('span.epm-defreeze', { title: 'Defreeze question' }, icon('chat', 14), h('span', s.defreeze)) : (done && pm ? h('span.epm-muted', 'No defreeze yet') : '')),
         h('td.epm-nowrap', recs.length ? recs.map(function (u, i) { return h('a.epm-link.epm-rec', { href: u, target: '_blank', rel: 'noopener', onclick: function (e) { e.stopPropagation(); } }, icon('play', 14), recs.length > 1 ? 'Rec ' + (i + 1) : 'Recording'); }) : (done ? h('span.epm-muted.epm-small', 'No recording') : '')),
-        h('td.num', rate ? pctCell(rate.rate) : '')));
+        h('td.num', rate ? h('span', { title: rate.p + ' of ' + rate.base + ' enrolled learners attended' }, pctCell(rate.rate)) : '')));
     });
-    card.appendChild(h('.epm-table-wrap', h('table.epm-table.epm-table-sm.epm-cal', h('colgroup', h('col', { style: { width: '120px' } }), h('col', { style: { width: '36%' } }), h('col'), h('col', { style: { width: '170px' } }), h('col', { style: { width: '76px' } })), tb)));
+    card.appendChild(h('.epm-table-wrap', h('table.epm-table.epm-table-sm.epm-cal', h('colgroup', h('col', { style: { width: '120px' } }), h('col', { style: { width: '36%' } }), h('col'), h('col', { style: { width: '170px' } }), h('col', { style: { width: '96px' } })),
+      h('thead', h('tr', h('th', 'Date'), h('th', 'Module'), h('th', 'Defreeze'), h('th', 'Recording'), h('th.num', { title: 'Learners who attended, out of everyone enrolled at that date' }, 'Attendance'))), tb)));
     el.appendChild(card);
   });
 }
@@ -224,30 +228,35 @@ function tabAttendance(el, ctx) {
     clear(wrap);
     var sessions = C.sessions.filter(function (s) { return showAll || (s.date && s.date <= today()); });
     if (!sessions.length) { wrap.appendChild(empty('No sessions held yet. Tick “Show future sessions” to see the plan.')); return; }
-    var groups = [];
-    sessions.forEach(function (s) { var g = groups[groups.length - 1]; if (!g || g.b !== s.blockId) groups.push({ b: s.blockId, n: 1 }); else g.n++; });
+    var groups = [], gstart = {};
+    sessions.forEach(function (s) { var g = groups[groups.length - 1]; if (!g || g.b !== s.blockId) { groups.push({ b: s.blockId, n: 1 }); gstart[s.id] = 1; } else g.n++; });
     var thead = h('thead',
       h('tr', h('th.epm-sticky', { rowspan: '2' }, 'Learner'), h('th.num', { rowspan: '2' }, 'Total'), groups.map(function (g) { var b = M.block[g.b]; return h('th.epm-group', { colspan: String(g.n), title: b.title }, b.kind === 'course' ? 'C' + b.number : b.title); })),
       h('tr', sessions.map(function (s) {
         var r = M.sessionRate[s.id];
-        return h('th.epm-att-h', { title: sessionLabel(s, M) + (r ? ' · ' + pct(r.rate) + ' present' : '') },
+        return h('th.epm-att-h', { class: gstart[s.id] ? 'epm-gstart' : '', title: sessionLabel(s, M) + (r ? ' · ' + r.p + ' of ' + r.base + ' attended' : '') },
           pm ? h('button.epm-att-hb', { type: 'button', onclick: function (e) { columnMenu(e.currentTarget, s); } }, fmtDate(s.date).replace(/ \d\d$/, ''), h('small', s.moduleNo || '')) : [fmtDate(s.date).replace(/ \d\d$/, ''), h('small', s.moduleNo || '')]);
       })));
     var tbody = h('tbody', M.enrollments.map(function (e) {
       var st = M.stats[e.email], inactive = !M.isCounted[e.email];
       return h('tr', { class: inactive ? 'epm-dim' : '' },
-        h('td.epm-sticky', h('span', fullName(M.learner[e.email])), inactive ? h('div.epm-small.epm-muted', e.status) : null),
+        h('td.epm-sticky', h('span', fullName(M.learner[e.email])), NO_LIVE.indexOf(e.status) >= 0 ? h('div.epm-small.epm-muted', e.status + (e.statusDate ? ' · since ' + fmtDate(e.statusDate) : '')) : null),
         h('td.num', pctCell(st.att)),
         sessions.map(function (s) {
           var v = (M.att[e.email] || {})[s.id] || '';
-          var cell = h('td.epm-att', { class: v === 'Present' ? 'p' : v === 'Absent' ? 'a' : '' });
+          var gs = gstart[s.id] ? ' epm-gstart' : '';
+          var notYet = s.date && M.startOf(e) > s.date;
+          if (notYet || !attApplies(e, s.date)) {
+            return h('td.epm-att.na', { class: gs, title: notYet ? 'Not in this cohort yet' : 'Not counted: ' + e.status + (e.statusDate ? ' since ' + fmtDate(e.statusDate) : '') }, h('span', '—'));
+          }
+          var cell = h('td.epm-att', { class: (v === 'Present' ? 'p' : v === 'Absent' ? 'a' : '') + gs });
           if (pm) {
             var b = h('button', { type: 'button', 'aria-label': fullName(M.learner[e.email]) + ' ' + fmtDate(s.date) + ': ' + (v || 'no mark') }, v ? v[0] : '·');
             b.addEventListener('click', function () {
               var cur = (M.att[e.email] || {})[s.id] || '';
               var next = cur === '' ? 'Present' : cur === 'Present' ? 'Absent' : '';
               (M.att[e.email] = M.att[e.email] || {})[s.id] = next;
-              cell.className = 'epm-att ' + (next === 'Present' ? 'p' : next === 'Absent' ? 'a' : '');
+              cell.className = 'epm-att ' + (next === 'Present' ? 'p' : next === 'Absent' ? 'a' : '') + gs;
               b.textContent = next ? next[0] : '·';
               pending[s.id + '|' + e.email] = { sessionId: s.id, email: e.email, status: next, source: 'manual' };
               clearTimeout(timer); timer = setTimeout(flush, 900);
@@ -257,7 +266,8 @@ function tabAttendance(el, ctx) {
           return cell;
         }));
     }));
-    var foot = h('tfoot', h('tr', h('td.epm-sticky', 'Present'), h('td.num', pctCell(M.kpi.attendance)), sessions.map(function (s) { var r = M.sessionRate[s.id]; return h('td.num.epm-small', r ? Math.round(r.rate * 100) + '%' : ''); })));
+    var foot = h('tfoot', h('tr', h('td.epm-sticky', { title: 'Per session: learners who attended out of everyone enrolled at that date' }, 'Attended'), h('td.num', pctCell(M.kpi.attendance)),
+      sessions.map(function (s) { var r = M.sessionRate[s.id]; return h('td.num.epm-small', { class: gstart[s.id] ? 'epm-gstart' : '', title: r ? r.p + ' of ' + r.base : '' }, r ? Math.round(r.rate * 100) + '%' : ''); })));
     wrap.appendChild(h('.epm-table-wrap.epm-att-wrap', h('table.epm-table.epm-att-table', thead, tbody, foot)));
   }
   function columnMenu(anchor, s) {
@@ -267,7 +277,7 @@ function tabAttendance(el, ctx) {
       btn('Clear this session', { kind: 'ghost' }, function () { bulk(''); }),
       btn('Import Zoom CSV for this session', { icon: 'upload', kind: 'primary' }, function () { m.close(); zoomImportModal(ctx, s.id); })));
     function bulk(v) {
-      var recs = M.counted.map(function (e) { return { sessionId: s.id, email: e.email, status: v, source: 'manual' }; });
+      var recs = M.expectedAt(s).map(function (e) { return { sessionId: s.id, email: e.email, status: v, source: 'manual' }; });
       api('attendance.save', { cohortId: ctx.id, records: recs }).then(function () { m.close(); toast('Saved'); ctx.reload(); }).catch(fail);
     }
   }
@@ -282,7 +292,10 @@ function zoomImportModal(ctx, sessionId) {
   var sessSel = selectEl([{ value: '', label: 'Choose session…' }].concat(C.sessions.map(function (s) { return { value: s.id, label: sessionLabel(s, M) }; })), sessionId || '');
   var thrIn = inputEl(thr, { type: 'number', min: '0', max: '100', style: { width: '80px' } });
   var durIn = inputEl('', { type: 'number', min: '1', style: { width: '90px' } });
-  var learners = M.counted.map(function (e) { return M.learner[e.email]; }).filter(Boolean);
+  var everyone = M.enrollments.map(function (e) { return M.learner[e.email]; }).filter(Boolean);
+  // who was expected at the chosen session (in the cohort by then and attending live)
+  var eligible = function () { var s = M.session[sessSel.value]; return (s ? M.expectedAt(s) : M.live).map(function (e) { return M.learner[e.email]; }).filter(Boolean); };
+  sessSel.addEventListener('change', function () { draw(); });
   var assign = {}; // participant key -> email ('' = ignore)
   var override = {}; // email -> status
   file.addEventListener('change', function () {
@@ -290,7 +303,7 @@ function zoomImportModal(ctx, sessionId) {
     var rd = new FileReader();
     rd.onload = function () {
       try { parsed = parseZoomParticipants(rd.result); } catch (e) { return toast(e.message, 'error'); }
-      matches = matchZoomPeople(parsed.people, learners, C.aliases || []);
+      matches = matchZoomPeople(parsed.people, everyone, C.aliases || []);
       if (parsed.meetingMinutes) durIn.value = parsed.meetingMinutes;
       if (!sessSel.value && parsed.date) {
         var exact = C.sessions.find(function (s) { return s.date === parsed.date; });
@@ -309,7 +322,7 @@ function zoomImportModal(ctx, sessionId) {
       if (em) minutesBy[em] = (minutesBy[em] || 0) + p.minutes;
     });
     var need = (Number(durIn.value) || 0) * (Number(thrIn.value) || 0) / 100;
-    return learners.map(function (l) {
+    return eligible().map(function (l) {
       var mins = minutesBy[l.email] || 0;
       var auto = mins > 0 && mins >= need ? 'Present' : 'Absent';
       return { email: l.email, minutes: Math.round(mins), status: override[l.email] || auto, auto: auto };
@@ -329,7 +342,7 @@ function zoomImportModal(ctx, sessionId) {
     out.appendChild(h('h4', 'Participants not matched (' + unmatched.length + ')'));
     out.appendChild(h('p.epm-muted.epm-small', 'Host, staff and guests usually appear here. If one of them is a learner with a different Zoom name, choose who it is: the platform will remember it next time.'));
     out.appendChild(h('.epm-stack', matches.filter(function (p) { return !p.match || p.key in assign; }).map(function (p) {
-      var sel = selectEl([{ value: '', label: '— Not a learner —' }].concat(learners.map(function (l) { return { value: l.email, label: fullName(l) }; })), assign[p.key] || '', {
+      var sel = selectEl([{ value: '', label: '— Not a learner —' }].concat(eligible().map(function (l) { return { value: l.email, label: fullName(l) }; })), assign[p.key] || '', {
         'aria-label': 'Who is ' + p.name, onchange: function () { assign[p.key] = this.value; draw(); } });
       return h('.epm-row2', h('span', h('b', p.name || p.email), ' ', h('span.epm-muted.epm-small', (p.email || '') + ' · ' + Math.round(p.minutes) + ' min')), sel);
     })));
@@ -386,10 +399,14 @@ function lmsDetailModal(ctx, email) {
       var done = {}; (p.completed || []).forEach(function (c) { done[c[0]] = c[1] || true; });
       var det = h('details.epm-details', h('summary', h('b', blockLabel(b)), ' ', pctCell((p.percent || 0) / 100)));
       (course.structure || []).forEach(function (s) {
-        det.appendChild(h('.epm-lms-sec', s.name));
-        det.appendChild(h('ul.epm-lms', s.lectures.map(function (l) {
+        var n = s.lectures.filter(function (l) { return l.id in done; }).length;
+        det.appendChild(h('.epm-lms-sec', h('span', s.name), h('span.epm-lms-count', { class: n === s.lectures.length ? 'all' : n ? 'some' : '' }, n + ' / ' + s.lectures.length)));
+        det.appendChild(h('.epm-lms', s.lectures.map(function (l) {
           var ok = l.id in done;
-          return h('li', { class: ok ? 'ok' : '' }, h('span.epm-lms-mark', ok ? '✓' : '–'), l.name, ok && typeof done[l.id] === 'string' ? h('span.epm-muted.epm-small', ' ' + fmtDate(done[l.id])) : null);
+          return h('.epm-lms-row', { class: ok ? 'ok' : '' },
+            h('span.epm-lms-pill', ok ? [icon('check', 13), 'Completed'] : 'Not done'),
+            h('span.epm-lms-name', l.name),
+            ok && typeof done[l.id] === 'string' && done[l.id] ? h('span.epm-muted.epm-small.epm-nowrap', fmtDate(done[l.id])) : h('span'));
         })));
       });
       body.appendChild(det);

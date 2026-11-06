@@ -33,7 +33,7 @@ TEACHABLE = {
 
 STATUS_MAP = {
     'enrrolled active': 'Enrolled Active', 'enrolled active': 'Enrolled Active',
-    'enrrolled inactive': 'Enrolled Inactive', 'enrolled inactive': 'Enrolled Inactive',
+    'enrrolled inactive': 'Low Activity', 'enrolled inactive': 'Low Activity', 'low activity': 'Low Activity',
     'dropped out': 'Dropped Out', 'moved to next cohort': 'Moved to next cohort',
     'graduated': 'Graduated', 'asynchronous': 'Asynchronous',
 }

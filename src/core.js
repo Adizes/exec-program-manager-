@@ -108,7 +108,7 @@ var ICONS = {
   sync: '<path d="M20 11a8 8 0 00-14-5L4 8M4 4v4h4M4 13a8 8 0 0014 5l2-2M20 20v-4h-4"/>', upload: '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
   copy: '<path d="M8 8h12v12H8z"/><path d="M4 16V4h12"/>', play: '<path d="M7 5l12 7-12 7z"/>', chevron: '<path d="M9 6l6 6-6 6"/>', back: '<path d="M15 6l-6 6 6 6"/>',
   user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>', alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17v1"/>', out: '<path d="M14 4h6v16h-6M10 8l-4 4 4 4M6 12h10"/>',
-  ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>', filter: '<path d="M4 5h16l-6 8v6l-4-2v-4z"/>',
+  ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/>', chat: '<path d="M4 5h16v11H10l-5 4v-4H4z"/>', filter: '<path d="M4 5h16l-6 8v6l-4-2v-4z"/>',
 };
 function icon(name, size) {
   var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -215,8 +215,12 @@ function scaleEl(max, value, name) {
   return wrap;
 }
 function badge(text, kind) { return h('span.epm-badge', { class: kind ? 'epm-badge-' + kind : '' }, text); }
-var STATUS_KIND = { 'Enrolled Active': 'good', 'Enrolled Inactive': 'muted', 'Asynchronous': 'info', 'Dropped Out': 'bad', 'Moved to next cohort': 'violet', 'Graduated': 'dark' };
-function statusBadge(s) { return badge(s || '—', STATUS_KIND[s] || 'muted'); }
+var STATUS_KIND = { 'Enrolled Active': 'good', 'Low Activity': 'mid', 'Enrolled Inactive': 'mid', 'Asynchronous': 'info', 'Dropped Out': 'bad', 'Moved to next cohort': 'violet', 'Graduated': 'dark' };
+function statusBadge(s, e) {
+  var b = badge(s || '—', STATUS_KIND[s] || 'muted');
+  if (e && e.statusDate && ['Dropped Out', 'Moved to next cohort', 'Asynchronous'].indexOf(s) >= 0) return h('span.epm-status', b, h('small', 'since ' + fmtDate(e.statusDate)));
+  return b;
+}
 function empty(text, action) { return h('.epm-empty', h('p', text), action || null); }
 
 /* ---------------- router ---------------- */

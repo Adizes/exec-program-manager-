@@ -184,7 +184,7 @@ function learnerDrawer(ctx, email) {
   var nav = h('.epm-subtabs');
   var pane = h('div');
   append(body, [
-    h('.epm-drawer-sum', statusBadge(e.status), h('span', 'Attendance ', pctCell(st.att)), h('span', 'LMS ', pctCell(st.lms)), st.exp != null ? h('span', 'Rating ' + num(st.exp) + '/5') : null,
+    h('.epm-drawer-sum', statusBadge(e.status, e), h('span', 'Attendance ', pctCell(st.att)), h('span', 'LMS ', pctCell(st.lms)), st.exp != null ? h('span', 'Rating ' + num(st.exp) + '/5') : null,
       st.risk.length ? badge('Needs attention', 'bad') : null),
     nav, pane]);
   function drawNav() { clear(nav); tabs.forEach(function (t) { nav.appendChild(h('a', { href: 'javascript:void 0', class: t[0] === cur ? 'on' : '', onclick: function () { cur = t[0]; drawNav(); draw(); } }, t[1])); }); }
@@ -224,23 +224,32 @@ function learnerDrawer(ctx, email) {
             })))]);
     }
     if (cur === 'program') {
-      var status = selectEl(O.enrollmentStatus, e.status), wes = h('input', { type: 'checkbox', checked: !!e.welcomeEmailSent });
+      var status = selectEl(O.enrollmentStatus.concat(O.enrollmentStatus.indexOf(e.status) < 0 ? [e.status] : []), e.status), wes = h('input', { type: 'checkbox', checked: !!e.welcomeEmailSent });
+      var since = inputEl(e.statusDate || today(), { type: 'date' });
+      var sinceField = field('Since (sessions after this date do not count)', since);
+      var syncSince = function () { sinceField.style.display = NO_LIVE.indexOf(status.value) >= 0 ? '' : 'none'; if (status.value !== e.status && !e.statusDate) since.value = today(); };
+      status.addEventListener('change', syncSince);
       var kit = selectEl([''].concat(O.welcomeKit), l.welcomeKit || ''), books = inputEl(l.booksCode), cert = selectEl([''].concat(O.certification), e.certificationSent || '');
       append(pane, [
-        h('.epm-row2', field('Status in ' + C.cohort.name, status), field('Certification sent', cert)),
+        h('.epm-row2', field('Status in ' + C.cohort.name, status), sinceField),
+        h('.epm-row2', field('Certification sent', cert), h('span')),
         h('.epm-row2', field('Welcome kit sent', kit), field('Books code', books)),
         h('label.epm-check', wes, h('span', 'Welcome email sent')),
+        (setTimeout(syncSince, 0), null),
         h('.epm-actions', btn('Save', { kind: 'primary' }, function () {
-          Promise.all([api('enrollment.update', { id: e.id, patch: { status: status.value, welcomeEmailSent: wes.checked, certificationSent: cert.value } }),
+          var patch = { status: status.value, welcomeEmailSent: wes.checked, certificationSent: cert.value };
+          if (NO_LIVE.indexOf(status.value) >= 0) patch.statusDate = since.value || today();
+          Promise.all([api('enrollment.update', { id: e.id, patch: patch }),
             api('learner.update', { email: email, patch: { welcomeKit: kit.value, booksCode: books.value } })]).then(function () { toast('Saved'); m.close(); ctx.reload(); }).catch(fail);
         })),
         h('.epm-card.epm-card-flat', h('h4', 'Move to another cohort'), h('p.epm-small.epm-muted', 'Marks this enrollment as “Moved to next cohort” and enrolls the person in the other cohort. Their history stays.'),
           (function () {
             var to = selectEl([{ value: '', label: 'Choose cohort…' }].concat((C.otherCohorts || []).map(function (c) { return { value: c.id, label: c.name + ' (' + c.status + ')' }; })), '');
             var note = inputEl('', { placeholder: 'Reason (optional, logged in Conversations)' });
-            return h('div', h('.epm-row2', to, note), h('.epm-actions', btn('Move learner', { kind: 'primary' }, function () {
+            var mdate = inputEl(today(), { type: 'date' });
+            return h('div', h('.epm-row2', field('Move to', to), field('Moved on (later sessions here do not count)', mdate)), field('Reason', note), h('.epm-actions', btn('Move learner', { kind: 'primary' }, function () {
               if (!to.value) return toast('Choose the cohort', 'error');
-              api('enrollment.move', { id: e.id, toCohortId: to.value, note: note.value || ' ' }).then(function () { toast('Moved'); m.close(); S.cohorts = {}; refreshBoot(); ctx.reload(); }).catch(fail);
+              api('enrollment.move', { id: e.id, toCohortId: to.value, date: mdate.value, note: note.value || ' ' }).then(function () { toast('Moved'); m.close(); S.cohorts = {}; refreshBoot(); ctx.reload(); }).catch(fail);
             })));
           })()),
         h('.epm-card.epm-card-flat', h('h4', 'Remove from this cohort'), h('p.epm-small.epm-muted', 'Only for mistakes. To record that someone left, use the status “Dropped Out” instead.'),

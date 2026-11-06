@@ -1,7 +1,10 @@
 /* ===================================================================================
  * MODEL — derived numbers for a cohort bundle (same rules as the old Matrix sheets)
  * =================================================================================== */
-var INACTIVE = ['Dropped Out', 'Moved to next cohort'];
+var INACTIVE = ['Dropped Out', 'Moved to next cohort'];          // left the cohort: not in counts / averages
+var NO_LIVE = INACTIVE.concat(['Asynchronous']);                  // no live attendance from their statusDate on
+// Does live attendance count for this enrollment on this date?
+function attApplies(e, date) { return NO_LIVE.indexOf(e.status) < 0 || !!(e.statusDate && date && date <= e.statusDate); }
 
 function computeCohort(C) {
   var t = today();
@@ -15,6 +18,15 @@ function computeCohort(C) {
   });
   M.counted = M.enrollments.filter(function (e) { return INACTIVE.indexOf(e.status) < 0; });
   M.isCounted = {}; M.counted.forEach(function (e) { M.isCounted[e.email] = 1; });
+  M.live = M.counted.filter(function (e) { return NO_LIVE.indexOf(e.status) < 0; });   // expected at live sessions today
+  M.enr = {}; M.enrollments.forEach(function (e) { M.enr[e.email] = e; });
+  var dates = C.sessions.map(function (s) { return s.date; }).filter(Boolean).sort();
+  M.firstDate = dates[0] || '';
+  // when each person joined: cohort start, or the move date for people moved in later
+  M.startOf = function (e) { var c = String(e.createdAt || '').slice(0, 10); return e.movedFromCohortId && c > M.firstDate ? c : M.firstDate; };
+  M.launch = M.enrollments.filter(function (e) { return M.startOf(e) <= M.firstDate; }).length;
+  // people expected at a given session (already in the cohort and still attending live)
+  M.expectedAt = function (s) { return M.enrollments.filter(function (e) { return (!s.date || M.startOf(e) <= s.date) && attApplies(e, s.date); }); };
   M.att = {}; // email -> sessionId -> status
   C.attendance.forEach(function (a) { (M.att[a.e] = M.att[a.e] || {})[a.s] = a.v; });
   M.lmsBlocks = C.blocks.filter(function (b) { return b.teachableCourseId; });
@@ -33,7 +45,7 @@ function computeCohort(C) {
   M.enrollments.forEach(function (e) {
     var a = M.att[e.email] || {}, p = 0, tot = 0, byBlock = {};
     Object.keys(a).forEach(function (sid) {
-      var s = M.session[sid]; if (!s) return;
+      var s = M.session[sid]; if (!s || !attApplies(e, s.date)) return;
       var bb = byBlock[s.blockId] || (byBlock[s.blockId] = { p: 0, t: 0 });
       if (a[sid] === 'Present') { p++; tot++; bb.p++; bb.t++; } else if (a[sid] === 'Absent') { tot++; bb.t++; }
     });
@@ -54,16 +66,24 @@ function computeCohort(C) {
     }
     M.stats[e.email] = s;
   });
-  // per session: % present among counted learners with a mark
+  // per session, both against the people enrolled by then (fixed base, not a moving total):
+  //   rate = attended / enrolled · activeRate = still in the program / enrolled
   M.sessionRate = {};
   C.sessions.forEach(function (s) {
-    var p = 0, tot = 0;
-    M.counted.forEach(function (e) { var v = (M.att[e.email] || {})[s.id]; if (v === 'Present') { p++; tot++; } else if (v === 'Absent') tot++; });
-    M.sessionRate[s.id] = tot ? { rate: p / tot, p: p, t: tot } : null;
+    var base = 0, p = 0, active = 0, marks = 0;
+    M.enrollments.forEach(function (e) {
+      if (s.date && M.startOf(e) > s.date) return;
+      base++;
+      if (INACTIVE.indexOf(e.status) < 0 || (e.statusDate && s.date && s.date <= e.statusDate)) active++;
+      var v = (M.att[e.email] || {})[s.id];
+      if (v) marks++;
+      if (v === 'Present' && attApplies(e, s.date)) p++;
+    });
+    M.sessionRate[s.id] = marks && base ? { rate: p / base, activeRate: active / base, p: p, active: active, base: base } : null;
   });
   M.kpi = {
     learners: M.counted.length,
-    attendance: avg(M.counted.map(function (e) { return M.stats[e.email].att; })),
+    attendance: avg(M.live.map(function (e) { return M.stats[e.email].att; })),
     lms: avg(M.counted.map(function (e) { return M.stats[e.email].lms; })),
     weekly: avg((C.weeklyFeedback || []).map(overall5)),
     module: avg((C.moduleFeedback || []).map(overall5)),
